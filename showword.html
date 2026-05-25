@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TSV Word Search</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; padding: 24px; }
+  h1 { font-size: 1.4rem; margin-bottom: 16px; }
+
+  .search-bar {
+    display: flex; gap: 8px; margin-bottom: 20px; align-items: center; flex-wrap: wrap;
+  }
+  .search-bar input {
+    flex: 1; min-width: 220px; padding: 8px 12px; border: 1px solid #ccc;
+    border-radius: 6px; font-size: 1rem;
+  }
+  .search-bar button {
+    padding: 8px 20px; background: #2563eb; color: #fff; border: none;
+    border-radius: 6px; font-size: 1rem; cursor: pointer;
+  }
+  .search-bar button:hover { background: #1d4ed8; }
+  .search-bar button:disabled { background: #94a3b8; cursor: default; }
+  .search-bar select {
+    padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px;
+    font-size: 0.9rem; background: #fff; cursor: pointer; max-width: 340px;
+  }
+
+  #status { font-size: 0.9rem; color: #555; margin-bottom: 12px; min-height: 1.2em; }
+
+  #results { display: flex; flex-direction: column; gap: 12px; }
+
+  .card {
+    background: #fff; border: 1px solid #ddd; border-radius: 8px;
+    padding: 14px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .card-header {
+    display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .card-ref  { font-weight: 700; font-size: 1rem; color: #1e40af; }
+  .card-text { font-size: 1.3rem; font-family: 'SBL Greek', 'GFS Didot', serif; color: #333; }
+  .card-gloss { font-size: 0.95rem; color: #555; font-style: italic; }
+
+  .fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 6px 16px;
+  }
+  .field { display: flex; flex-direction: column; }
+  .field-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .05em; color: #888; }
+  .field-value { font-size: 0.92rem; color: #111; }
+  .field-value.greek { font-family: 'SBL Greek', 'GFS Didot', serif; font-size: 1rem; }
+
+  .no-results { color: #888; text-align: center; padding: 40px; }
+</style>
+</head>
+<body>
+
+<h1>TSV Word Search</h1>
+
+<div class="search-bar">
+  <select id="fileSelect" onchange="onFileChange()">
+    <option value="tsv/source_macula_greek_SBLGNT+required.tsv">source_macula_greek_SBLGNT+required.tsv</option>
+    <option value="tsv/source_macula_hebrew+required.tsv">source_macula_hebrew+required.tsv</option>
+    <option value="tsv/target_NA27-YLT.tsv">target_NA27-YLT.tsv</option>
+    <option value="tsv/target_ot_WLC-YLT.tsv">target_ot_WLC-YLT.tsv</option>
+    <option value="tsv/target_BSB_20240904.tsv">target_BSB_20240904.tsv</option>
+    <option value="tsv/target_arb-vd.tsv">target_arb-vd.tsv</option>
+    <option value="tsv/target_VanDyck_new.tsv">target_VanDyck_new.tsv</option>
+    <option value="tsv/target_BSB_old.tsv">target_BSB_old.tsv</option>
+    <option value="tsv/Koine_Greek_Alphabet_Guide.tsv">Koine_Greek_Alphabet_Guide.tsv</option>
+  </select>
+  <input id="query" type="text" placeholder="Search English or text…" />
+  <button id="searchBtn" onclick="doSearch()" disabled>Search</button>
+</div>
+
+<div id="status">Loading TSV…</div>
+<div id="results"></div>
+
+<script>
+// Column index map (built from header row)
+let COL = {};
+let rows = [];   // array of string[]
+
+function onFileChange() {
+  COL = {};
+  rows = [];
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('searchBtn').disabled = true;
+  document.getElementById('status').textContent = 'Loading TSV…';
+  loadTSV();
+}
+
+async function loadTSV() {
+  const path = document.getElementById('fileSelect').value;
+  try {
+    const resp = await fetch(path);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    const lines = text.split('\n');
+    const header = lines[0].split('\t');
+    header.forEach((h, i) => { COL[h.trim()] = i; });
+    rows = lines.slice(1).filter(l => l.trim()).map(l => l.split('\t'));
+    const filename = path.split('/').pop();
+    document.getElementById('status').textContent = `${filename}: ${rows.length.toLocaleString()} rows loaded.`;
+    document.getElementById('searchBtn').disabled = false;
+  } catch (e) {
+    document.getElementById('status').textContent = `Error loading TSV: ${e.message}`;
+  }
+}
+
+function val(row, col) {
+  const idx = COL[col];
+  return (idx !== undefined && row[idx] !== undefined) ? row[idx].trim() : '';
+}
+
+function doSearch() {
+  const query = document.getElementById('query').value.trim().toLowerCase();
+  if (!query) return;
+
+  const englishIdx    = COL['english'];
+  const textIdx       = COL['text'];
+  const letterNameIdx = COL['Letter Name'];
+
+  const matches = rows.filter(row => {
+    const eng    = (row[englishIdx]    || '').toLowerCase();
+    const grk    = (row[textIdx]       || '').toLowerCase();
+    const letter = (row[letterNameIdx] || '').toLowerCase();
+    return eng.includes(query) || grk.includes(query) || letter.includes(query);
+  });
+
+  document.getElementById('status').textContent =
+    `${matches.length.toLocaleString()} result${matches.length !== 1 ? 's' : ''} for "${query}"`;
+
+  renderResults(matches);
+}
+
+const DISPLAY_FIELDS = [
+  { key: 'class',      label: 'Class'      },
+  { key: 'type',       label: 'Type'       },
+  { key: 'english',    label: 'English'    },
+  { key: 'lemma',      label: 'Lemma',     greek: true },
+  { key: 'normalized', label: 'Normalized', greek: true },
+  { key: 'strong',     label: 'Strong'     },
+  { key: 'morph',      label: 'Morph'      },
+  { key: 'person',     label: 'Person'     },
+  { key: 'number',     label: 'Number'     },
+  { key: 'gender',     label: 'Gender'     },
+  { key: 'case',       label: 'Case'       },
+  { key: 'tense',      label: 'Tense'      },
+  { key: 'voice',      label: 'Voice'      },
+  { key: 'mood',       label: 'Mood'       },
+  { key: 'degree',     label: 'Degree'     },
+  { key: 'domain',     label: 'Domain'     },
+];
+
+function renderResults(matches) {
+  const container = document.getElementById('results');
+  if (!matches.length) {
+    container.innerHTML = '<div class="no-results">No results found.</div>';
+    return;
+  }
+
+  const MAX_DISPLAY = 200;
+  const toShow = matches.slice(0, MAX_DISPLAY);
+
+  const html = toShow.map(row => {
+    const ref   = val(row, 'ref');
+    const text  = val(row, 'text');
+    const gloss = val(row, 'gloss');
+
+    const fieldsHtml = DISPLAY_FIELDS
+      .map(f => {
+        const v = val(row, f.key);
+        if (!v) return '';
+        return `<div class="field">
+          <span class="field-label">${f.label}</span>
+          <span class="field-value${f.greek ? ' greek' : ''}">${escHtml(v)}</span>
+        </div>`;
+      })
+      .join('');
+
+    return `<div class="card">
+      <div class="card-header">
+        <span class="card-ref">${escHtml(ref)}</span>
+        <span class="card-text">${escHtml(text)}</span>
+        ${gloss ? `<span class="card-gloss">"${escHtml(gloss)}"</span>` : ''}
+      </div>
+      <div class="fields">${fieldsHtml}</div>
+    </div>`;
+  }).join('');
+
+  const overflow = matches.length > MAX_DISPLAY
+    ? `<div class="no-results" style="padding:16px">Showing first ${MAX_DISPLAY} of ${matches.length.toLocaleString()} results. Refine your search to see more.</div>`
+    : '';
+
+  container.innerHTML = html + overflow;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Allow Enter key to trigger search
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('query').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !document.getElementById('searchBtn').disabled) doSearch();
+  });
+  loadTSV();
+});
+</script>
+</body>
+</html>
