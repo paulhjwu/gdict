@@ -3,7 +3,20 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
-const SA = require('./avian-casing-491003-p0-8361d893391b.json');
+function loadServiceAccount() {
+  const envPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const candidatePath = envPath
+    ? path.resolve(envPath)
+    : path.join(__dirname, 'avian-casing-491003-p0-8361d893391b.json');
+
+  if (!fs.existsSync(candidatePath)) {
+    return null;
+  }
+
+  return JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+}
+
+const SA = loadServiceAccount();
 const WORD_AUDIO_DIR = path.join(__dirname, 'word_audio');
 
 // Register app:// scheme before app is ready
@@ -16,6 +29,12 @@ protocol.registerSchemesAsPrivileged([{
 let _token = null, _tokenExpiry = 0;
 
 async function getGoogleToken() {
+  if (!SA) {
+    throw new Error(
+      'Google TTS credentials not found. Set GOOGLE_APPLICATION_CREDENTIALS or add avian-casing-491003-p0-8361d893391b.json in project root.'
+    );
+  }
+
   if (_token && Date.now() < _tokenExpiry) return _token;
   const now = Math.floor(Date.now() / 1000);
   const header  = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
@@ -36,7 +55,15 @@ async function getGoogleToken() {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
   });
-  const data = await resp.json();
+  let data = null;
+  try {
+    data = await resp.json();
+  } catch {
+    data = null;
+  }
+  if (!resp.ok) {
+    throw new Error((data && (data.error_description || data.error)) || `Token request failed (HTTP ${resp.status})`);
+  }
   if (!data.access_token) throw new Error(data.error_description || 'Token fetch failed');
   _token = data.access_token;
   _tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
@@ -50,21 +77,33 @@ ipcMain.handle('get-word-audio', async (_event, translit, text) => {
   if (fs.existsSync(cachePath)) {
     return fs.readFileSync(cachePath);
   }
-  const token = await getGoogleToken();
-  const resp = await fetch('https://texttospeech.googleapis.com/v1/text:synthesize', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      input: { text },
-      voice: { languageCode: 'el-GR', ssmlGender: 'NEUTRAL' },
-      audioConfig: { audioEncoding: 'MP3' },
-    }),
-  });
-  const data = await resp.json();
-  if (!data.audioContent) throw new Error(data.error?.message || 'No audio returned');
-  const bytes = Buffer.from(data.audioContent, 'base64');
-  fs.writeFileSync(cachePath, bytes);
-  return bytes;
+  try {
+    const token = await getGoogleToken();
+    const resp = await fetch('https://texttospeech.googleapis.com/v1/text:synthesize', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: { text },
+        voice: { languageCode: 'el-GR', ssmlGender: 'NEUTRAL' },
+        audioConfig: { audioEncoding: 'MP3' },
+      }),
+    });
+    let data = null;
+    try {
+      data = await resp.json();
+    } catch {
+      data = null;
+    }
+    if (!resp.ok) {
+      throw new Error((data && data.error && data.error.message) || `Text-to-Speech request failed (HTTP ${resp.status})`);
+    }
+    if (!data || !data.audioContent) throw new Error('No audio returned');
+    const bytes = Buffer.from(data.audioContent, 'base64');
+    fs.writeFileSync(cachePath, bytes);
+    return bytes;
+  } catch (err) {
+    throw new Error((err && err.message) ? err.message : 'Unable to generate audio');
+  }
 });
 
 // ── Window ────────────────────────────────────────────────────────────────────

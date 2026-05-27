@@ -3,6 +3,28 @@ function setSpeakStatus(msg, isError) {
   if (el) { el.textContent = msg; el.style.color = isError ? '#ef4444' : '#64748b'; }
 }
 
+function cleanErrorMessage(err) {
+  const raw = (err && err.message) ? String(err.message) : String(err || 'Unknown error');
+  const prefix = "Error invoking remote method 'get-word-audio':";
+  const msg = raw.startsWith(prefix) ? raw.slice(prefix.length).trim() : raw;
+  if (/fetch failed/i.test(msg)) {
+    return 'Cloud audio is unavailable right now (network or credentials).';
+  }
+  return msg;
+}
+
+function speakWithBrowserTTS(text) {
+  if (!('speechSynthesis' in window)) return false;
+  const toSpeak = (text || '').trim();
+  if (!toSpeak) return false;
+
+  const utter = new SpeechSynthesisUtterance(toSpeak);
+  utter.lang = 'el-GR';
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utter);
+  return true;
+}
+
 let _audioCtx = null;
 function getAudioCtx() {
   if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -28,6 +50,11 @@ async function speakWord(translit, greekText) {
     src.start(0);
     setSpeakStatus('');
   } catch (e) {
-    setSpeakStatus('Error: ' + e.message, true);
+    const cloudError = cleanErrorMessage(e);
+    if (speakWithBrowserTTS(greekText)) {
+      setSpeakStatus('Using local voice. ' + cloudError, false);
+      return;
+    }
+    setSpeakStatus('Error: ' + cloudError, true);
   }
 }
