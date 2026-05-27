@@ -1,0 +1,22 @@
+# credentials & secrets
+avian-casing-491003-p0-8361d893391b.json
+.env
+
+# generated audio cache
+verse_audio/
+word_audio/
+
+# Node / Electron
+node_modules/
+dist/
+out/
+.webpack/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db

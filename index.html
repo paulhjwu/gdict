@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TSV Word Search</title>
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+
+<h1>TSV Word Search</h1>
+
+<div class="panels">
+
+  <div class="panel">
+    <div class="panel-title">tsv/</div>
+    <div class="controls">
+      <select class="file-select" id="tsv-fileSelect" onchange="tsvFileChange()"></select>
+    </div>
+    <div class="controls search-row">
+      <input id="tsv-query" type="text" placeholder="Search English or lemma…" />
+      <button id="tsv-searchBtn" onclick="tsvSearch()" disabled>Search</button>
+    </div>
+    <div id="tsv-status" class="status">Loading…</div>
+    <div id="tsv-results" class="results"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">dict/</div>
+    <div class="controls">
+      <select class="file-select" id="dict-fileSelect" onchange="dictFileChange()"></select>
+    </div>
+    <div id="dict-status" class="status">Loading…</div>
+    <div id="dict-results" class="results"></div>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="word-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-greek" id="modal-greek"></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-translit" id="modal-translit">…</div>
+      <button class="modal-speak" id="modal-speak" onclick="speakCurrentWord()">🔊 Speak</button>
+      <div id="modal-speak-status" style="font-size:0.78rem;color:#64748b;min-height:1em;"></div>
+    </div>
+    <div class="modal-occurrences" id="modal-occurrences"></div>
+  </div>
+</div>
+
+<script src="src/translit.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/renderer.js"></script>
+</body>
+</html>
