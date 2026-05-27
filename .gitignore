@@ -6,6 +6,9 @@ avian-casing-491003-p0-8361d893391b.json
 verse_audio/
 word_audio/
 
+# data files
+data/
+
 # Node / Electron
 node_modules/
 dist/
