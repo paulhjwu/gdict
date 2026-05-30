@@ -49,14 +49,21 @@ function sblTranslit(greek) {
   return out;
 }
 
-let wordTranslit = {};
+let grkTranslit = {};
 
-async function loadWordTranslit() {
-  const resp = await fetch('./word_translit.json');
-  wordTranslit = await resp.json();
+async function loadGrkTranslit() {
+  const resp = await fetch('./Grk_entry.json');
+  grkTranslit = await resp.json();
 }
 
 function lookupTranslit(word) {
   if (!word) return '';
-  return wordTranslit[word.toLowerCase()] || sblTranslit(word);
+  const entry = grkTranslit[word.toLowerCase()];
+  if (entry) return entry.transliteration || '';
+  return sblTranslit(word);
+}
+
+function lookupGrkEntry(word) {
+  if (!word) return null;
+  return grkTranslit[word.toLowerCase()] || null;
 }

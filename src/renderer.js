@@ -68,7 +68,7 @@ async function loadTSV() {
 function tsvSearch() {
   const query = document.getElementById('tsv-query').value.trim().toLowerCase();
   if (!query) return;
-  const searchIdxs = ['english', 'lemma', 'text']
+  const searchIdxs = ['english', 'lemma', 'text', 'strong']
     .map(k => tsv.COL[k]).filter(i => i !== undefined);
   const matches = tsv.rows.filter(row =>
     searchIdxs.some(i => (row[i] || '').toLowerCase().includes(query))
@@ -196,6 +196,17 @@ function openWordModal(word, ref) {
   currentTranslit = translit;
   renderOccurrences(lemma);
   document.getElementById('modal-translit').textContent = translit || '—';
+
+  const entry = lookupGrkEntry(currentNorm || word);
+  const defEl = document.getElementById('modal-def');
+  if (entry && (entry.Morphology || entry.Translation)) {
+    defEl.innerHTML =
+      (entry.Translation ? `<div class="entry-translation">${escHtml(entry.Translation)}</div>` : '') +
+      (entry.Morphology  ? `<div class="entry-morphology">${escHtml(entry.Morphology)}</div>`  : '') +
+      (entry.sn          ? `<div class="entry-sn">${escHtml(entry.sn)}</div>`                  : '');
+  } else {
+    defEl.innerHTML = '';
+  }
 }
 
 function closeModal() {
@@ -224,20 +235,49 @@ function renderOccurrences(lemma) {
     const n = normIdx  !== undefined ? (row[normIdx]  || '').trim() : '';
     const m = morphIdx !== undefined ? (row[morphIdx] || '').trim() : '';
     const t = lookupTranslit(n);
-    return `<div class="modal-occ-item" data-ref="${escAttr(r)}" data-word="${escAttr(n)}" data-translit="${escAttr(t)}">
-      <span class="occ-ref">${escHtml(r)}</span>
-      <span class="occ-word-col">
-        <span class="occ-word">${escHtml(n)}</span>
-        ${t ? `<span class="occ-translit">${escHtml(t)}</span>` : ''}
-      </span>
-      <span class="occ-morph">${escHtml(m)}</span>
-      <button class="occ-speak-btn" data-translit="${escAttr(t)}" data-word="${escAttr(n)}">🔊</button>
+    return `<div class="occ-entry">
+      <div class="modal-occ-item" data-ref="${escAttr(r)}" data-word="${escAttr(n)}" data-translit="${escAttr(t)}">
+        <span class="occ-ref">${escHtml(r)}</span>
+        <span class="occ-word-col">
+          <span class="occ-word">${escHtml(n)}</span>
+          ${t ? `<span class="occ-translit">${escHtml(t)}</span>` : ''}
+        </span>
+        <span class="occ-morph">${escHtml(m)}</span>
+        <button class="occ-speak-btn" data-translit="${escAttr(t)}" data-word="${escAttr(n)}">🔊</button>
+        <button class="occ-gen-btn" data-ref="${escAttr(r)}" data-word="${escAttr(n)}" title="Generate sentence">✨</button>
+      </div>
+      <div class="occ-sentence-box"></div>
     </div>`;
   }).join('');
 }
 
 function speakCurrentWord() {
   speakWord(currentTranslit, currentNorm || currentWord);
+}
+
+function translitSentence(sentence) {
+  return sentence.split(/\s+/).map(w => {
+    const clean = w.replace(/[.,;·!?·—]/g, '');
+    return lookupTranslit(clean) || sblTranslit(clean);
+  }).join(' ');
+}
+
+// ── Ref parser (bookCode / chapter / verse from occurrence ref string) ────────
+function parseOccRef(ref) {
+  // "JHN 4:14!17" → { bookCode:'JHN', chapter:4, verse:14 }
+  const base = ref.split('!')[0].trim();
+  const sp   = base.indexOf(' ');
+  if (sp === -1) return null;
+  const bookCode = base.slice(0, sp);
+  const [ch, v]  = base.slice(sp + 1).split(':').map(Number);
+  if (!bookCode || isNaN(ch) || isNaN(v)) return null;
+  return { bookCode, chapter: ch, verse: v };
+}
+
+function searchCode(sn, morph) {
+  const q = document.getElementById('tsv-query');
+  if (q) { q.value = sn; tsvSearch(); }
+  closeModal();
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -250,7 +290,7 @@ function escAttr(s) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  loadWordTranslit();
+  loadGrkTranslit();
 
   document.getElementById('tsv-fileSelect').innerHTML =
     TSV_FILES.map(f => `<option value="${f}">${f}</option>`).join('');
@@ -295,18 +335,54 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('mouseup', onUp);
   });
 
-  document.getElementById('modal-occurrences').addEventListener('click', e => {
-    const btn = e.target.closest('.occ-speak-btn');
-    if (btn) {
-      speakWord(btn.dataset.translit || '', btn.dataset.word || '');
+  document.getElementById('modal-occurrences').addEventListener('click', async e => {
+    const speakBtn = e.target.closest('.occ-speak-btn');
+    if (speakBtn) {
+      speakWord(speakBtn.dataset.translit || '', speakBtn.dataset.word || '');
       return;
     }
+
+    const genBtn = e.target.closest('.occ-gen-btn');
+    if (genBtn) {
+      const entry = genBtn.closest('.occ-entry');
+      const box   = entry && entry.querySelector('.occ-sentence-box');
+      if (!box) return;
+
+      // Toggle if already loaded
+      if (box.dataset.loaded === '1') {
+        box.classList.toggle('open');
+        return;
+      }
+
+      box.classList.add('open');
+      box.innerHTML = '<span class="occ-sent-loading">Shortening verse…</span>';
+
+      const parsed = parseOccRef(genBtn.dataset.ref || '');
+      if (!parsed) { box.innerHTML = '<span class="occ-sent-error">Invalid ref</span>'; return; }
+      const { bookCode, chapter, verse } = parsed;
+      const word = genBtn.dataset.word || '';
+      try {
+        const { greek, english } = await window.electronAPI.shortenVerse(bookCode, chapter, verse, word);
+        const translit = translitSentence(greek);
+        box.dataset.loaded = '1';
+        box.innerHTML =
+          `<div class="occ-sent-greek">${escHtml(greek)}</div>` +
+          `<div class="occ-sent-translit">${escHtml(translit)}</div>` +
+          `<div class="occ-sent-english">${escHtml(english)}</div>`;
+      } catch (err) {
+        box.innerHTML = `<span class="occ-sent-error">${escHtml(err.message || 'Error')}</span>`;
+      }
+      return;
+    }
+
     const item = e.target.closest('.modal-occ-item');
     if (item) {
       currentNorm     = item.dataset.word || '';
       currentTranslit = item.dataset.translit || '';
-      document.getElementById('modal-greek').textContent   = currentNorm;
+      document.getElementById('modal-greek').textContent    = currentNorm;
       document.getElementById('modal-translit').textContent = currentTranslit || '—';
     }
   });
+
 });
+

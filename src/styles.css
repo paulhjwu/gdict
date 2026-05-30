@@ -122,6 +122,15 @@ h1 { font-size: 1.4rem; margin-bottom: 16px; }
 }
 .modal-speak:hover { background: #1d4ed8; }
 .modal-speak:disabled { background: #94a3b8; cursor: default; }
+.modal-def {
+  padding: 8px 20px 10px; font-size: 0.82rem; color: #334155;
+  border-top: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 3px;
+}
+.modal-def:empty { display: none; }
+.entry-translation { font-style: italic; color: #1e40af; }
+.entry-morphology  { font-family: monospace; font-size: 0.74rem; color: #64748b; }
+.entry-sn          { font-size: 0.72rem; color: #94a3b8; }
+
 .modal-occurrences { overflow-y: auto; flex: 1; }
 .modal-occ-item {
   display: flex; gap: 10px; align-items: center;
@@ -140,3 +149,28 @@ h1 { font-size: 1.4rem; margin-bottom: 16px; }
 }
 .occ-speak-btn:hover { background: #1d4ed8; }
 .occ-speak-btn:disabled { background: #94a3b8; cursor: default; }
+
+.occ-gen-btn {
+  padding: 3px 7px; background: #7c3aed; color: #fff; border: none;
+  border-radius: 5px; font-size: 0.78rem; cursor: pointer; flex-shrink: 0;
+}
+.occ-gen-btn:hover { background: #6d28d9; }
+
+.occ-entry { display: flex; flex-direction: column; border-bottom: 1px solid #f1f5f9; }
+.occ-entry:last-child { border-bottom: none; }
+.occ-entry .modal-occ-item { border-bottom: none; }
+
+.occ-sentence-box {
+  display: none; padding: 7px 20px 9px 28px;
+  background: #f8f5ff; border-top: 1px solid #ede9fe;
+}
+.occ-sentence-box.open { display: block; }
+.occ-sent-greek {
+  font-family: 'SBL Greek', 'GFS Didot', serif;
+  font-size: 1rem; color: #1e1b4b; margin-bottom: 2px;
+}
+.occ-sent-translit { font-size: 0.78rem; color: #6d28d9; font-style: italic; }
+.occ-sent-english  { font-size: 0.78rem; color: #374151; margin-top: 2px; }
+
+.occ-sent-loading  { font-size: 0.8rem; color: #94a3b8; }
+.occ-sent-error    { font-size: 0.8rem; color: #ef4444; }

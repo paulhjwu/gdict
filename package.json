@@ -4,7 +4,7 @@
   "description": "Bible study dictionary app",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron . --disable-gpu --disable-software-rasterizer"
   },
   "devDependencies": {
     "electron": "^42.3.0"

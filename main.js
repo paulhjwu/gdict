@@ -1,7 +1,19 @@
 const { app, BrowserWindow, ipcMain, protocol } = require('electron');
+app.disableHardwareAcceleration();
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { spawnSync } = require('child_process');
+
+// Load .env into process.env
+(function loadEnv() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
+  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.+)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+  }
+})();
 
 function loadServiceAccount() {
   const envPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -104,6 +116,52 @@ ipcMain.handle('get-word-audio', async (_event, translit, text) => {
   } catch (err) {
     throw new Error((err && err.message) ? err.message : 'Unable to generate audio');
   }
+});
+
+// ── IPC: fetch verse + shorten with Gemini ───────────────────────────────────
+ipcMain.handle('shorten-verse', async (_event, bookCode, chapter, verse, word) => {
+  const tsvDir     = path.join(__dirname, 'tsv');
+  const scriptPath = path.join(__dirname, 'data', 'query_verse.py');
+  const result = spawnSync(
+    'python3',
+    [scriptPath, tsvDir, bookCode, String(chapter), String(verse)],
+    { encoding: 'utf8' }
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(result.stderr || 'query_verse.py failed');
+  const { greek: fullGreek, bsb: fullBsb } = JSON.parse(result.stdout.trim());
+
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('GEMINI_API_KEY not set in .env');
+
+  const prompt =
+    `Greek verse: "${fullGreek}"\n` +
+    `BSB English: "${fullBsb}"\n` +
+    `Key Greek word: "${word}"\n\n` +
+    `Shorten BOTH to fewer than 10 words each. ` +
+    `The Greek must contain the exact word "${word}". ` +
+    `The English must retain its translation. ` +
+    `Reply with ONLY JSON: {"greek":"...","english":"..."}`;
+
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 120 },
+      }),
+    }
+  );
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error?.message || `Gemini HTTP ${resp.status}`);
+  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!raw) throw new Error('Empty Gemini response');
+  const cleaned = raw.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim();
+  const parsed = JSON.parse(cleaned);
+  if (!parsed.greek) throw new Error('Unexpected Gemini response format');
+  return { greek: parsed.greek, english: parsed.english || '' };
 });
 
 // ── Window ────────────────────────────────────────────────────────────────────
