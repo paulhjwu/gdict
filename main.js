@@ -3,15 +3,19 @@ app.disableHardwareAcceleration();
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
 
 // Load .env into process.env
 (function loadEnv() {
   const envPath = path.join(__dirname, '.env');
   if (!fs.existsSync(envPath)) return;
-  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
-    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.+)$/);
-    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const m = trimmed.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+    if (!m) continue;
+    const key = m[1];
+    const value = m[2].trim();
+    if (!process.env[key]) process.env[key] = value;
   }
 })();
 
@@ -118,21 +122,85 @@ ipcMain.handle('get-word-audio', async (_event, translit, text) => {
   }
 });
 
+const NT_BOOK_NUMBERS = {
+  MAT: 40, MRK: 41, LUK: 42, JHN: 43, ACT: 44, ROM: 45,
+  '1CO': 46, '2CO': 47, GAL: 48, EPH: 49, PHP: 50, COL: 51,
+  '1TH': 52, '2TH': 53, '1TI': 54, '2TI': 55, TIT: 56,
+  PHM: 57, HEB: 58, JAS: 59, '1PE': 60, '2PE': 61,
+  '1JN': 62, '2JN': 63, '3JN': 64, JUD: 65, REV: 66,
+};
+
+function parseTsvFile(filePath) {
+  const text = fs.readFileSync(filePath, 'utf8');
+  const lines = text.split(/\r?\n/);
+  const rows = lines.map(line => line.split('\t'));
+  return rows;
+}
+
+function buildGreekVerse(tsvDir, bookCode, chapter, verse) {
+  const filePath = path.join(tsvDir, 'source_macula_greek_SBLGNT+required.tsv');
+  if (!fs.existsSync(filePath)) throw new Error('Greek TSV source file not found.');
+  const rows = parseTsvFile(filePath);
+  const header = rows[0] || [];
+  const columns = header.reduce((acc, name, idx) => {
+    if (name) acc[name] = idx;
+    return acc;
+  }, {});
+  const refPrefix = `${bookCode} ${chapter}:${verse}!`;
+  const verseRows = rows.slice(1).filter(row => (row[columns.ref] || '').startsWith(refPrefix));
+  if (!verseRows.length) {
+    throw new Error(`Greek verse not found: ${bookCode} ${chapter}:${verse}`);
+  }
+  let greek = '';
+  for (const row of verseRows) {
+    const token = (row[columns.text] || '').trim();
+    if (!token) continue;
+    const after = row[columns.after] || '';
+    greek += token;
+    greek += after || ' ';
+  }
+  return greek.replace(/\s+/g, ' ').trim();
+}
+
+function buildEnglishVerse(tsvDir, bookCode, chapter, verse) {
+  const bookNumber = NT_BOOK_NUMBERS[bookCode];
+  if (!bookNumber) {
+    throw new Error(`Unsupported book code: ${bookCode}`);
+  }
+  const filePath = path.join(tsvDir, 'target_BSB_20240904.tsv');
+  if (!fs.existsSync(filePath)) throw new Error('BSB TSV target file not found.');
+  const rows = parseTsvFile(filePath);
+  const header = rows[0] || [];
+  const columns = header.reduce((acc, name, idx) => {
+    if (name) acc[name] = idx;
+    return acc;
+  }, {});
+  const verseId = `${String(bookNumber).padStart(2, '0')}${String(chapter).padStart(3, '0')}${String(verse).padStart(3, '0')}`;
+  const verseRows = rows.slice(1).filter(row =>
+    (row[columns.source_verse] || '') === verseId && (row[columns.exclude] || '').trim().toLowerCase() !== 'y'
+  );
+  if (!verseRows.length) {
+    throw new Error(`English verse not found: ${bookCode} ${chapter}:${verse}`);
+  }
+  let english = '';
+  for (const row of verseRows) {
+    const token = (row[columns.text] || '').trim();
+    if (!token) continue;
+    const skipSpace = (row[columns.skip_space_after] || '').trim().toLowerCase() === 'y';
+    english += token;
+    if (!skipSpace) english += ' ';
+  }
+  return english.replace(/\s+/g, ' ').trim();
+}
+
 // ── IPC: fetch verse + shorten with Gemini ───────────────────────────────────
 ipcMain.handle('shorten-verse', async (_event, bookCode, chapter, verse, word) => {
-  const tsvDir     = path.join(__dirname, 'tsv');
-  const scriptPath = path.join(__dirname, 'data', 'query_verse.py');
-  const result = spawnSync(
-    'python3',
-    [scriptPath, tsvDir, bookCode, String(chapter), String(verse)],
-    { encoding: 'utf8' }
-  );
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(result.stderr || 'query_verse.py failed');
-  const { greek: fullGreek, bsb: fullBsb } = JSON.parse(result.stdout.trim());
+  const tsvDir = path.join(__dirname, 'tsv');
+  const fullGreek = buildGreekVerse(tsvDir, bookCode, chapter, verse);
+  const fullBsb = buildEnglishVerse(tsvDir, bookCode, chapter, verse);
 
   const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY not set in .env');
+  if (!key) throw new Error('GEMINI_API_KEY not set in .env or environment');
 
   const prompt =
     `Greek verse: "${fullGreek}"\n` +
